@@ -106,17 +106,3 @@ x ~ Normal(0, proposal_scale^2 I)
 
 The action supplies the physics. Exact grid integration validates observables for low dimension.
 
-## CV framing
-
-A good project description:
-
-> Built a holomorphic triangular neural contour flow for oscillatory complex path integrals, with exact complex Jacobian phase tracking and validation against exact-grid observables on a phi^4 sign-problem benchmark.
-
-Useful metrics to report:
-
-- average phase before/after learning
-- effective sample size
-- observable error against exact grid values
-- determinant finite-difference test
-- contour plots in 2D (`--plot-contour`)
-- ablations: identity contour, additive coupling, affine coupling
