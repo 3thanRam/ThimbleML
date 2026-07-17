@@ -10,9 +10,17 @@ The repository is designed around a falsifiable question:
 
 This is a research prototype, not a claim that the current architecture is state of the art.
 
-## Curent Status
+## Current status
 
-In a preregistered 3×3 architecture ablation, all nine runs remained numerically finite but eventually underwent held-out importance-weight collapse. Collapse occurred in additive, affine, and triangular-linear variants across all seeds, indicating that the failure was associated with the shared phase-focused objective rather than a single architectural component.
+In a preregistered 3×3 architecture ablation, all nine runs remained numerically finite but eventually underwent held-out importance-weight collapse. Collapse occurred in additive, affine, and triangular-linear variants across all seeds, indicating that the failure was associated with the shared phase-focused objective rather than a single architectural component. The complete result, locked settings, execution record, and interpretation are documented in [`docs/locked_ablation_results.md`](docs/locked_ablation_results.md).
+
+| Architecture | Runs | Completed | Collapsed | Non-finite | Parameters |
+|---|---:|---:|---:|---:|---:|
+| Additive coupling | 3 | 0 | 3 | 0 | 912 |
+| Affine coupling | 3 | 0 | 3 | 0 | 912 |
+| Affine + triangular-linear mixing | 3 | 0 | 3 | 0 | 944 |
+
+This is a negative empirical result: no architecture produced a successful final checkpoint, and failed seeds were not replaced or retuned.
 
 ## Core estimator
 
@@ -117,7 +125,7 @@ Use the same proposal data, optimization budget, precision, thresholds, and seed
 - affine coupling: `--no-triangular-linear`;
 - affine coupling plus triangular-linear mixing: default settings.
 
-Repeat with seeds `7`, `17`, and `27`. The complete locked policy and interpretation rules are in [`docs/experiment_protocol.md`](docs/experiment_protocol.md).
+Repeat with seeds `7`, `17`, and `27`. The locked policy is in [`docs/experiment_protocol.md`](docs/experiment_protocol.md), the executable workflow is in [`docs/locked_ablation.md`](docs/locked_ablation.md), and the completed result is in [`docs/locked_ablation_results.md`](docs/locked_ablation_results.md).
 
 An optional `--ess-penalty` adds a differentiable `-log(batch ESS / batch size)` penalty. It defaults to zero and should only be used in a separately declared sensitivity study, not introduced after inspecting a failed run.
 
@@ -128,7 +136,7 @@ An optional `--ess-penalty` adds a differentiable `-log(batch ESS / batch size)`
 - Finite execution does not establish estimator validity or empirical superiority.
 - Collapse detection prevents a misleading success signal; it does not solve the underlying contour-learning problem.
 - Exact-grid validation scales poorly beyond very small dimension.
-- The repository does not yet contain a completed multi-seed benchmark table with uncertainty intervals.
+- The completed multi-seed result is uniformly negative, so there are no successful final-run metrics from which to estimate performance uncertainty intervals.
 
 ## License
 
