@@ -34,6 +34,11 @@ class HolomorphicAffineCoupling(nn.Module):
         log det J = sum_{b entries} s_b(z_a)
 
     exactly. This includes the complex determinant phase.
+
+    ``scale_factor`` is a small multiplicative factor, not a hard clip. A complex
+    ``tanh`` must not be used as a clamp here: it is meromorphic, has poles, and
+    is not bounded in magnitude on the complex plane. Direct scaling keeps the
+    conditioner holomorphic without introducing those poles.
     """
 
     def __init__(
@@ -44,8 +49,8 @@ class HolomorphicAffineCoupling(nn.Module):
         depth: int = 2,
         activation: Literal["poly", "tanh", "sin"] = "poly",
         dtype: torch.dtype = torch.float32,
-        scale_clip: float = 0.35,
-        translation_scale: float = 0.25,
+        scale_factor: float = 0.01,
+        translation_scale: float = 0.02,
     ):
         super().__init__()
         if mask.numel() != dim:
@@ -55,7 +60,7 @@ class HolomorphicAffineCoupling(nn.Module):
         mask_f = mask.to(dtype=dtype).view(1, dim)
         self.register_buffer("mask", mask_f, persistent=False)
         self.register_buffer("inv_mask", 1.0 - mask_f, persistent=False)
-        self.scale_clip = float(scale_clip)
+        self.scale_factor = float(scale_factor)
         self.translation_scale = float(translation_scale)
         self.conditioner = HolomorphicMLP(
             dim_in=dim,
@@ -72,8 +77,7 @@ class HolomorphicAffineCoupling(nn.Module):
         inv_mask = self.inv_mask.to(dtype=z.real.dtype, device=z.device).to(z.dtype)
         h = self.conditioner(z * mask)
         raw_s, raw_t = h.chunk(2, dim=-1)
-        # tanh is holomorphic; multiplying by a real scalar preserves holomorphicity.
-        s = self.scale_clip * torch.tanh(raw_s) * inv_mask
+        s = self.scale_factor * raw_s * inv_mask
         t = self.translation_scale * raw_t * inv_mask
         return s, t
 
@@ -97,7 +101,6 @@ class HolomorphicAffineCoupling(nn.Module):
         s, t = self._condition(z)
         z_prev = z * mask + inv_mask * ((z - t) * torch.exp(-s))
         return z_prev, logdet - s.sum(dim=-1)
-
 
 
 class ComplexTriangularLinear(nn.Module):
@@ -139,6 +142,7 @@ class ComplexTriangularLinear(nn.Module):
         rhs = (z - self.bias).transpose(0, 1)
         x = torch.linalg.solve_triangular(W, rhs, upper=(self.orientation == "upper")).transpose(0, 1)
         return x, logdet - self.log_diag.sum() * torch.ones_like(logdet)
+
 
 class ComplexPermutation(nn.Module):
     """Holomorphic coordinate permutation with determinant sign tracked exactly."""
@@ -191,14 +195,18 @@ class HolomorphicTriangularFlow(nn.Module):
         depth: int = 2,
         activation: Literal["poly", "tanh", "sin"] = "poly",
         dtype: torch.dtype = torch.float32,
-        scale_clip: float = 0.35,
-        translation_scale: float = 0.25,
+        scale_factor: float = 0.01,
+        translation_scale: float = 0.02,
         use_permutations: bool = False,
         use_triangular_linear: bool = True,
+        scale_clip: float | None = None,
     ):
         super().__init__()
         if dim < 2:
             raise ValueError("dim must be >= 2 for coupling layers")
+        if scale_clip is not None:
+            # Backwards-compatible keyword alias. The value is a factor, not a clip.
+            scale_factor = scale_clip
         self.dim = dim
         self.dtype = dtype
         self.ctype = complex_dtype_from_float(dtype)
@@ -213,7 +221,7 @@ class HolomorphicTriangularFlow(nn.Module):
                     depth=depth,
                     activation=activation,
                     dtype=dtype,
-                    scale_clip=scale_clip,
+                    scale_factor=scale_factor,
                     translation_scale=translation_scale,
                 )
             )
