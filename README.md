@@ -10,6 +10,10 @@ The repository is designed around a falsifiable question:
 
 This is a research prototype, not a claim that the current architecture is state of the art.
 
+## Curent Status
+
+In a preregistered 3×3 architecture ablation, all nine runs remained numerically finite but eventually underwent held-out importance-weight collapse. Collapse occurred in additive, affine, and triangular-linear variants across all seeds, indicating that the failure was associated with the shared phase-focused objective rather than a single architectural component.
+
 ## Core estimator
 
 For
