@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install numpy matplotlib pytest
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Run end-to-end smoke training
+        run: |
+          python main.py \
+            --steps 2 \
+            --batch-size 32 \
+            --train-samples 256 \
+            --valid-samples 128 \
+            --grid-points 21 \
+            --valid-batches 1 \
+            --device cpu \
+            --run-dir /tmp/thimble-smoke
+          test -f /tmp/thimble-smoke/config.json
+          test -f /tmp/thimble-smoke/metrics.csv
+          test -f /tmp/thimble-smoke/model.pt
