@@ -28,6 +28,22 @@ jobs:
       - name: Run unit tests
         run: pytest -q
 
+      - name: Validate locked ablation orchestration
+        run: |
+          python scripts/run_locked_ablation.py --dry-run --device cpu > /tmp/locked-commands.txt
+          test "$(grep -c 'main.py' /tmp/locked-commands.txt)" -eq 9
+          grep -q -- '--scale-factor 0.0.*--no-triangular-linear' /tmp/locked-commands.txt
+          grep -q -- '--scale-factor 0.01.*--no-triangular-linear' /tmp/locked-commands.txt
+          grep -q -- '--scale-factor 0.01' /tmp/locked-commands.txt
+          python scripts/summarize_ablation.py \
+            --run-root /tmp/missing-locked-runs \
+            --results-dir /tmp/locked-report \
+            --architectures additive \
+            --seeds 7
+          test -f /tmp/locked-report/ablation_runs.csv
+          test -f /tmp/locked-report/ablation_summary.csv
+          test -f /tmp/locked-report/ablation_report.md
+
       - name: Run finite non-collapsed training smoke test
         run: |
           python main.py \
