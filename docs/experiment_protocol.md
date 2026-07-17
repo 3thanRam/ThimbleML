@@ -12,7 +12,7 @@ Can a holomorphic triangular contour flow improve held-out phase concentration a
 - **H2:** Triangular complex-linear mixing improves either average phase or ESS relative to affine coupling alone without increasing exact-grid observable error.
 - **H3:** Improvements are consistent across training seeds rather than being driven by one initialization.
 
-A negative result is informative. The architecture should be reported as unsupported when gains reverse across seeds, disappear under a matched budget, or require materially worse observable error.
+A negative result is informative. The architecture should be reported as unsupported when gains reverse across seeds, disappear under a matched budget, require materially worse observable error, or encounter non-finite training values.
 
 ## Locked data
 
@@ -30,9 +30,24 @@ python scripts/make_data.py \
 
 Do not regenerate the proposal samples between model seeds. This isolates model initialization and optimization variability from data variability.
 
+## Locked optimization settings
+
+Use the finite-safe defaults for every architecture unless a separate preregistered sensitivity study changes them:
+
+```text
+dtype = float64
+learning rate = 2e-4
+scale factor = 0.01
+translation scale = 0.02
+steps = 800
+batch size = 512
+```
+
+A run that raises a non-finite-value error is a failed run. Do not restart it with a different learning rate and silently include the replacement in the same comparison.
+
 ## Architecture ablations
 
-Use the same number of steps, batch size, validation batches, grid, and learning rate for all configurations.
+Use the same proposal data, number of steps, batch size, validation batches, grid, learning rate, precision, and seed set for all configurations.
 
 ### Additive coupling
 
@@ -41,7 +56,7 @@ python main.py \
   --data data/proposal_samples.npz \
   --run-dir runs/additive-seed7 \
   --seed 7 \
-  --scale-clip 0 \
+  --scale-factor 0 \
   --no-triangular-linear
 ```
 
@@ -68,7 +83,7 @@ Repeat each configuration with seeds `7`, `17`, and `27`.
 
 ## Primary metrics
 
-Read the final held-out values from each run's `metrics.csv`:
+Read the final held-out values from each successful run's `metrics.csv`:
 
 - `valid_avg_phase`
 - `valid_ess`
@@ -88,9 +103,9 @@ For every architecture, report:
 - parameter count;
 - training budget and hardware;
 - exact command and commit SHA;
-- failures, NaNs, or excluded runs.
+- failures, non-finite errors, or excluded runs.
 
-A compact table should have one row per architecture and columns for average phase, ESS, the three observable errors, parameter count, and wall time.
+A compact table should have one row per architecture and columns for average phase, ESS, the three observable errors, parameter count, wall time, and successful runs out of three.
 
 ## Interpretation rules
 
@@ -99,10 +114,11 @@ Treat an architecture as supported only when:
 1. the direction of improvement is consistent across seeds;
 2. the gain is not explained by materially higher observable error;
 3. the comparison uses the same proposal data and training budget;
-4. all determinant and inverse tests pass at the reported commit;
-5. the result survives at least one modest change to the validation batch count or grid resolution.
+4. all determinant, inverse, and training-stability tests pass at the reported commit;
+5. every included run completes with finite values;
+6. the result survives at least one modest change to the validation batch count or grid resolution.
 
-Do not describe a one-seed increase as a robust improvement. Do not select only the best checkpoint or seed without stating that selection rule in advance.
+Do not describe a one-seed increase as a robust improvement. Do not select only the best checkpoint or seed without stating that selection rule in advance. Do not treat numerical survival alone as evidence that the estimator is statistically correct.
 
 ## Further strengthening
 

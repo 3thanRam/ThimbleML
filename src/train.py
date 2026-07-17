@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -24,14 +25,25 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--valid-batches", type=int, default=10)
     p.add_argument("--proposal-scale", type=float, default=1.6)
-    p.add_argument("--lr", type=float, default=2e-3)
+    p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--layers", type=int, default=4)
     p.add_argument("--hidden", type=int, default=32)
     p.add_argument("--depth", type=int, default=2)
     p.add_argument("--activation", type=str, choices=["poly", "tanh", "sin"], default="poly")
-    p.add_argument("--scale-clip", type=float, default=0.35)
-    p.add_argument("--translation-scale", type=float, default=0.25)
-    p.add_argument("--dtype", type=str, choices=["float32", "float64"], default="float32")
+    p.add_argument(
+        "--scale-factor",
+        type=float,
+        default=0.01,
+        help="Multiplicative factor applied to the holomorphic log-scale head.",
+    )
+    p.add_argument(
+        "--scale-clip",
+        dest="scale_factor",
+        type=float,
+        help=argparse.SUPPRESS,
+    )
+    p.add_argument("--translation-scale", type=float, default=0.02)
+    p.add_argument("--dtype", type=str, choices=["float32", "float64"], default="float64")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--grid-points", type=int, default=401)
     p.add_argument("--grid-limit", type=float, default=5.0)
@@ -59,6 +71,22 @@ def append_csv(path: Path, row: dict[str, Any]) -> None:
         writer.writerow(row)
 
 
+def tensor_is_finite(value: torch.Tensor) -> bool:
+    if value.is_complex():
+        return bool(torch.isfinite(value.real).all() and torch.isfinite(value.imag).all())
+    return bool(torch.isfinite(value).all())
+
+
+def require_finite(name: str, value: torch.Tensor, step: int) -> None:
+    if not tensor_is_finite(value):
+        raise FloatingPointError(f"Non-finite {name} at training step {step}.")
+
+
+def require_finite_parameters(model: torch.nn.Module, step: int) -> None:
+    for name, parameter in model.named_parameters():
+        require_finite(f"parameter {name}", parameter.detach(), step)
+
+
 @torch.no_grad()
 def validate(model, benchmark, valid_loader, proposal_scale, device, max_batches: int) -> dict[str, float]:
     model.eval()
@@ -69,13 +97,26 @@ def validate(model, benchmark, valid_loader, proposal_scale, device, max_batches
             break
         x = x.to(device)
         logw, z, _ = complex_log_weights(model, benchmark, x, proposal_scale)
+        if not tensor_is_finite(logw) or not tensor_is_finite(z):
+            raise FloatingPointError("Non-finite values encountered during validation.")
         logws.append(logw.detach().cpu())
         zs.append(z.detach().cpu())
+    if not logws:
+        raise ValueError("Validation produced no batches; increase valid samples or valid-batches.")
     logw_all = torch.cat(logws, dim=0)
     z_all = torch.cat(zs, dim=0)
-    return {k: float(v) if isinstance(v, (int, float)) else v for k, v in estimate_observables(logw_all, z_all, benchmark).items()}
+    result = estimate_observables(logw_all, z_all, benchmark)
+    for name, value in result.items():
+        if isinstance(value, complex):
+            finite = math.isfinite(value.real) and math.isfinite(value.imag)
+        else:
+            finite = math.isfinite(float(value))
+        if not finite:
+            raise FloatingPointError(f"Non-finite validation metric {name}.")
+    return {k: float(v) if isinstance(v, (int, float)) else v for k, v in result.items()}
 
 
+@torch.no_grad()
 def maybe_plot_contour(model, run_dir: Path, device: torch.device, dtype: torch.dtype, dim: int) -> None:
     if dim != 2:
         return
@@ -91,8 +132,7 @@ def maybe_plot_contour(model, run_dir: Path, device: torch.device, dtype: torch.
             pts = torch.zeros(41, 2, dtype=dtype)
             pts[:, fixed_axis] = val
             pts[:, 1 - fixed_axis] = xs
-            with torch.no_grad():
-                z = model(x=pts.to(device)).z.cpu()
+            z = model(x=pts.to(device)).z.cpu()
             lines.append(z)
     fig = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(111)
@@ -140,7 +180,7 @@ def main() -> None:
         depth=args.depth,
         activation=args.activation,
         dtype=dtype,
-        scale_clip=args.scale_clip,
+        scale_factor=args.scale_factor,
         translation_scale=args.translation_scale,
         use_triangular_linear=not args.no_triangular_linear,
     ).to(device)
@@ -163,10 +203,18 @@ def main() -> None:
         x = x.to(device=device, dtype=dtype)
         opt.zero_grad(set_to_none=True)
         logw, z, logdet = complex_log_weights(model, benchmark, x, proposal_scale)
+        require_finite("log weights", logw, step)
+        require_finite("contour values", z, step)
+        require_finite("log determinant", logdet, step)
+
         loss, train_metrics = contour_loss(logw, z)
+        require_finite("loss", loss, step)
         loss.backward()
-        grad_norm = clip_grad_norm_(model.parameters(), max_norm=10.0)
+        grad_norm = clip_grad_norm_(model.parameters(), max_norm=10.0, error_if_nonfinite=True)
+        if not math.isfinite(float(grad_norm)):
+            raise FloatingPointError(f"Non-finite gradient norm at training step {step}.")
         opt.step()
+        require_finite_parameters(model, step)
 
         if step == 1 or step % max(1, min(100, args.steps // 10)) == 0 or step == args.steps:
             val = validate(model, benchmark, valid_loader, proposal_scale, device, args.valid_batches)
@@ -181,6 +229,8 @@ def main() -> None:
                     row[f"exact_{name}_imag"] = er.imag
                     row[f"abs_err_{name}"] = abs(vr - er)
                 row["exact_avg_phase_original_grid"] = exact["average_phase_original_grid"].real
+            if not all(math.isfinite(float(v)) for v in row.values()):
+                raise FloatingPointError(f"Non-finite logged metric at training step {step}.")
             append_csv(metrics_path, row)
             print(json.dumps(row, indent=2))
 
