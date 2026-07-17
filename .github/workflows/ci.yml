@@ -28,7 +28,7 @@ jobs:
       - name: Run unit tests
         run: pytest -q
 
-      - name: Run finite end-to-end training smoke test
+      - name: Run finite non-collapsed training smoke test
         run: |
           python main.py \
             --steps 40 \
@@ -41,8 +41,22 @@ jobs:
             --run-dir /tmp/thimble-smoke
           test -f /tmp/thimble-smoke/config.json
           test -f /tmp/thimble-smoke/metrics.csv
-          test -f /tmp/thimble-smoke/model.pt
+          test -f /tmp/thimble-smoke/model_best.pt
+          test -f /tmp/thimble-smoke/model_last.pt
+          test -f /tmp/thimble-smoke/status.json
           if grep -Eiq '(^|,)(nan|inf|-inf)(,|$)' /tmp/thimble-smoke/metrics.csv; then
             echo "Non-finite metric found in smoke run"
             exit 1
           fi
+          python - <<'PY'
+          import csv
+          import json
+          from pathlib import Path
+
+          run_dir = Path('/tmp/thimble-smoke')
+          rows = list(csv.DictReader((run_dir / 'metrics.csv').open()))
+          assert rows, 'Smoke run produced no metrics rows'
+          assert all(int(row['validation_collapsed']) == 0 for row in rows)
+          status = json.loads((run_dir / 'status.json').read_text())
+          assert status['status'] == 'completed'
+          PY

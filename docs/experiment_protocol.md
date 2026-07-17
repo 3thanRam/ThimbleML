@@ -12,7 +12,7 @@ Can a holomorphic triangular contour flow improve held-out phase concentration a
 - **H2:** Triangular complex-linear mixing improves either average phase or ESS relative to affine coupling alone without increasing exact-grid observable error.
 - **H3:** Improvements are consistent across training seeds rather than being driven by one initialization.
 
-A negative result is informative. The architecture should be reported as unsupported when gains reverse across seeds, disappear under a matched budget, require materially worse observable error, or encounter non-finite training values.
+A negative result is informative. The architecture is unsupported when gains reverse across seeds, disappear under a matched budget, require materially worse observable error, become non-finite, or rely on collapsed importance weights.
 
 ## Locked data
 
@@ -28,11 +28,11 @@ python scripts/make_data.py \
   --seed 1234
 ```
 
-Do not regenerate the proposal samples between model seeds. This isolates model initialization and optimization variability from data variability.
+Do not regenerate proposal samples between model seeds.
 
-## Locked optimization settings
+## Locked optimization and failure settings
 
-Use the finite-safe defaults for every architecture unless a separate preregistered sensitivity study changes them:
+Use the same settings for every architecture unless a separate preregistered sensitivity study changes them:
 
 ```text
 dtype = float64
@@ -41,13 +41,26 @@ scale factor = 0.01
 translation scale = 0.02
 steps = 800
 batch size = 512
+validation batches = 10
+minimum validation ESS fraction = 0.01
+maximum single-weight fraction = 0.50
+collapse patience = 1 validation
+ess penalty = 0
+checkpoint score = valid_avg_phase * valid_ess_fraction
 ```
 
-A run that raises a non-finite-value error is a failed run. Do not restart it with a different learning rate and silently include the replacement in the same comparison.
+A run is failed when it encounters non-finite values or when a validation reaches either collapse condition:
+
+```text
+valid_ess_fraction < 0.01
+valid_max_weight_fraction > 0.50
+```
+
+Do not restart a failed seed with altered settings and silently include the replacement in the same comparison. Threshold changes and a nonzero `--ess-penalty` belong in separately declared sensitivity studies.
 
 ## Architecture ablations
 
-Use the same proposal data, number of steps, batch size, validation batches, grid, learning rate, precision, and seed set for all configurations.
+Use identical proposal data, steps, batch size, validation batches, grid, learning rate, precision, thresholds, and seed set.
 
 ### Additive coupling
 
@@ -81,44 +94,63 @@ python main.py \
 
 Repeat each configuration with seeds `7`, `17`, and `27`.
 
+## Checkpoint policy
+
+Checkpoint selection is fixed before running experiments. Among non-collapsed validations, save the checkpoint that maximizes:
+
+```text
+valid_avg_phase * valid_ess_fraction
+```
+
+This score prevents a phase value near one from winning when it is supported by only one or a few samples. `model_last.pt` is written only when the full run completes successfully. A failed run may retain an earlier `model_best.pt` for diagnosis, but it remains a failed run and must not be counted as a successful final result.
+
+Do not retrospectively select a checkpoint because its observable errors or headline metric look favourable.
+
 ## Primary metrics
 
-Read the final held-out values from each successful run's `metrics.csv`:
+Report the final successful validation and the selected checkpoint validation separately. Include:
 
-- `valid_avg_phase`
-- `valid_ess`
-- `abs_err_z_mean`
-- `abs_err_z2_mean`
-- `abs_err_radius2`
-- wall-clock duration measured externally
+- `valid_avg_phase`;
+- `valid_ess` and `valid_ess_fraction`;
+- `valid_max_weight_fraction`;
+- `valid_weight_perplexity_fraction`;
+- `valid_real_logw_range` and real-log-weight quantiles;
+- `abs_err_z_mean`;
+- `abs_err_z2_mean`;
+- `abs_err_radius2`;
+- wall-clock duration measured externally;
+- run status and failure reason.
 
-Also report the original-contour grid reference stored as `exact_avg_phase_original_grid`. This is a deterministic reference for sign-problem severity, not a substitute for a matched held-out model baseline.
+Also report `exact_avg_phase_original_grid` as a deterministic reference for sign-problem severity, not as a substitute for a matched held-out baseline.
 
 ## Required reporting
 
 For every architecture, report:
 
-- mean and standard deviation across the three training seeds;
-- each individual seed result, not only the aggregate;
+- mean and standard deviation across the three seeds for successful runs;
+- each individual seed result;
+- successful runs out of three;
+- collapsed, non-finite, or otherwise failed runs without replacement;
 - parameter count;
 - training budget and hardware;
 - exact command and commit SHA;
-- failures, non-finite errors, or excluded runs.
+- final and selected-checkpoint metrics.
 
-A compact table should have one row per architecture and columns for average phase, ESS, the three observable errors, parameter count, wall time, and successful runs out of three.
+A compact table should include average phase, normalized ESS, maximum weight fraction, weight perplexity fraction, the three observable errors, wall time, and run status.
 
 ## Interpretation rules
 
 Treat an architecture as supported only when:
 
 1. the direction of improvement is consistent across seeds;
-2. the gain is not explained by materially higher observable error;
-3. the comparison uses the same proposal data and training budget;
-4. all determinant, inverse, and training-stability tests pass at the reported commit;
-5. every included run completes with finite values;
-6. the result survives at least one modest change to the validation batch count or grid resolution.
+2. the gain is not explained by worse observable error;
+3. the comparison uses the same data and training budget;
+4. determinant, inverse, stability, and collapse-diagnostic tests pass;
+5. every included run completes without non-finite values or weight collapse;
+6. improvements remain when phase, normalized ESS, and maximum weight fraction are considered together;
+7. the result survives a modest change to validation batch count or grid resolution.
 
-Do not describe a one-seed increase as a robust improvement. Do not select only the best checkpoint or seed without stating that selection rule in advance. Do not treat numerical survival alone as evidence that the estimator is statistically correct.
+A near-one average phase with normalized ESS near zero is a collapse signature, not an improvement. Numerical survival alone is not evidence of statistical correctness.
 
 ## Further strengthening
 
@@ -127,6 +159,6 @@ Before publication-quality claims, add:
 - bootstrap intervals over held-out proposal samples;
 - a compute-matched comparison;
 - a larger-dimensional benchmark with a trustworthy Monte Carlo reference;
-- component-level loss ablations;
-- checks for rare extreme weights and estimator instability;
-- a script that aggregates all run directories into a single versioned results table.
+- separately declared loss-component and ESS-penalty ablations;
+- tail diagnostics for rare extreme weights;
+- a versioned script that aggregates run directories into one results table.
