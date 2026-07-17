@@ -8,6 +8,10 @@ The locked experiment compares three architectures on one fixed proposal dataset
 
 All nine runs use the preregistered settings in [`experiment_protocol.md`](experiment_protocol.md): 800 steps, batch size 512, ten validation batches, double precision, learning rate `2e-4`, collapse thresholds of 1% normalized ESS and 50% maximum weight, and no ESS penalty.
 
+## Completed result
+
+The locked design has been executed. All nine runs remained numerically finite but failed because of held-out importance-weight collapse. The summary table, execution commit, locked settings, and interpretation are recorded in [`locked_ablation_results.md`](locked_ablation_results.md).
+
 ## Run the complete design
 
 ```bash
