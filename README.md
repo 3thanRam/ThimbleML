@@ -8,7 +8,7 @@ The repository is designed around a falsifiable question:
 
 > Can a learned holomorphic contour improve phase concentration and effective sample size while preserving observables validated against an exact low-dimensional reference?
 
-This is an engineering-complete prototype, not a claim that the current architecture is state of the art. The next research step is a locked multi-seed ablation with uncertainty intervals; see [`docs/experiment_protocol.md`](docs/experiment_protocol.md).
+This is a research prototype, not a claim that the current architecture is state of the art. The next research step is a locked multi-seed ablation with uncertainty intervals; see [`docs/experiment_protocol.md`](docs/experiment_protocol.md).
 
 ## Core estimator
 
@@ -49,15 +49,16 @@ log det J = sum s_theta(z_a)
 
 exactly. Learned lower- and upper-triangular complex-linear layers provide additional mixing while retaining an analytic determinant and inverse.
 
-The contour map deliberately avoids operations such as real/imaginary feature splitting, ReLU, magnitude gates, layer normalization, and softmax attention, because they do not preserve holomorphicity in the required sense.
+The contour map deliberately avoids operations such as real/imaginary feature splitting, ReLU, magnitude gates, layer normalization, and softmax attention, because they do not preserve holomorphicity in the required sense. The log-scale head is multiplied by a small factor directly; complex `tanh` is not used as a clamp because it has poles and is not bounded over the complex plane.
 
 ## Falsifiable checks
 
-The implementation is built around three independent checks:
+The implementation is built around four independent checks:
 
 1. **Jacobian correctness.** The analytic determinant is compared with a finite-difference complex Jacobian determinant.
 2. **Invertibility.** Forward and inverse maps must round-trip in double precision, with inverse log determinant equal to the negative forward value.
 3. **Observable preservation.** Low-dimensional observables are compared with exact-grid integration on the original real contour.
+4. **Numerical finiteness.** Training stops immediately if contour values, weights, loss, gradients, parameters, validation outputs, or logged metrics become non-finite.
 
 Training additionally records held-out average phase, effective sample size, and absolute observable error. A useful result must improve sampling diagnostics without introducing unacceptable observable error.
 
@@ -69,11 +70,12 @@ src/triangular_flow.py            coupling, triangular-linear, inverse, log dete
 src/benchmarks.py                 complex phi^4 sign-problem benchmark
 src/estimator.py                  contour weights, phase, ESS, loss, observables
 src/data_loading.py               deterministic proposal-data generation and loading
-src/train.py                      training loop, validation, artifact writing
+src/train.py                      training loop, validation, finite-value checks
 scripts/make_data.py              proposal-sample generation
 tests/test_triangular_jacobian.py determinant and inverse tests
 tests/test_exact_grid.py          exact-grid smoke test
 tests/test_identity_baseline.py   identity and estimator sanity checks
+tests/test_training_stability.py  non-finite and complex-scale regression tests
 docs/experiment_protocol.md       locked ablation and reporting protocol
 ```
 
@@ -94,7 +96,7 @@ A short CPU smoke run:
 
 ```bash
 python main.py \
-  --steps 5 \
+  --steps 40 \
   --batch-size 64 \
   --train-samples 1024 \
   --valid-samples 256 \
@@ -106,7 +108,7 @@ python main.py \
 
 The proposal dataset is generated automatically when it does not exist.
 
-A larger reference run:
+A larger reference run using the finite-safe defaults:
 
 ```bash
 python main.py \
@@ -115,6 +117,8 @@ python main.py \
   --grid-points 401 \
   --run-dir runs/main
 ```
+
+The defaults use double precision, learning rate `2e-4`, log-scale factor `0.01`, and translation scale `0.02`. These are conservative engineering defaults, not tuned benchmark hyperparameters.
 
 Outputs include:
 
@@ -125,13 +129,17 @@ runs/main/model.pt
 runs/main/contour_projection_z0.png  # only with --plot-contour
 ```
 
+A checkpoint is written only after all requested training steps finish with finite values. Failed runs raise an error instead of saving a corrupted model.
+
 ## Reproducible ablations
 
 The main comparisons use the same fixed proposal dataset and training budget:
 
-- additive coupling: `--scale-clip 0 --no-triangular-linear`
+- additive coupling: `--scale-factor 0 --no-triangular-linear`
 - affine coupling: `--no-triangular-linear`
 - affine coupling plus triangular-linear mixing: default settings
+
+The former `--scale-clip` option remains accepted as a hidden compatibility alias, but the value is a multiplicative factor rather than a mathematical clip.
 
 The full seed policy, commands, metrics, and interpretation rules are in [`docs/experiment_protocol.md`](docs/experiment_protocol.md).
 
@@ -161,6 +169,7 @@ The action supplies the physics. Exact-grid integration is used only for low-dim
 - Reported ESS is based on absolute centered weights and should be interpreted with the accompanying phase and observable errors.
 - The repository does not yet contain a completed multi-seed benchmark table with bootstrap or repeated-run uncertainty intervals.
 - Exact-grid validation scales poorly beyond very small dimension.
+- Finite training is necessary but does not establish statistical correctness or empirical superiority.
 
 These limitations are part of the experimental scope rather than hidden implementation details.
 
