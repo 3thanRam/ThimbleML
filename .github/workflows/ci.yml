@@ -28,12 +28,12 @@ jobs:
       - name: Run unit tests
         run: pytest -q
 
-      - name: Run end-to-end smoke training
+      - name: Run finite end-to-end training smoke test
         run: |
           python main.py \
-            --steps 2 \
+            --steps 40 \
             --batch-size 32 \
-            --train-samples 256 \
+            --train-samples 512 \
             --valid-samples 128 \
             --grid-points 21 \
             --valid-batches 1 \
@@ -42,3 +42,7 @@ jobs:
           test -f /tmp/thimble-smoke/config.json
           test -f /tmp/thimble-smoke/metrics.csv
           test -f /tmp/thimble-smoke/model.pt
+          if grep -Eiq '(^|,)(nan|inf|-inf)(,|$)' /tmp/thimble-smoke/metrics.csv; then
+            echo "Non-finite metric found in smoke run"
+            exit 1
+          fi
